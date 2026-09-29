@@ -1,0 +1,12 @@
+{
+  "name": "haywire",
+  "version": "1.2.0",
+  "description": "A cozy 3D needle hunt with physical hay, clever machinery, and a changing sky.",
+  "license": "MIT",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node server.js",
+    "test": "node --test tests/*.test.mjs"
+  }
+}

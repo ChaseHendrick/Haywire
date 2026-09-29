@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#f6f4ec">
+  <meta name="description" content="Haywire: a cozy little hunt with big machinery. Sweep, discover, research, and find the needle.">
+  <title>Haywire · A little hunt. Big ideas.</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='18' fill='%233d513d'/%3E%3Cpath d='M19 46 43 15' stroke='%23efca80' stroke-width='5' stroke-linecap='round'/%3E%3Cellipse cx='43' cy='15' rx='3' ry='6' transform='rotate(36 43 15)' fill='none' stroke='%23efca80' stroke-width='3'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="./style.css">
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="./" aria-label="Haywire home"><span class="brand-mark" aria-hidden="true"><svg viewBox="0 0 40 40"><path d="M11 31 28 9"/><ellipse cx="28" cy="9" rx="2.5" ry="4.8" transform="rotate(38 28 9)"/></svg></span><span>haywire<span class="brand-dot">.</span></span></a>
+    <div class="brand-caption">A LITTLE HUNT. BIG IDEAS.</div>
+    <nav class="top-actions" aria-label="Game settings">
+      <span class="save-indicator" id="save-status"><i></i> Saved locally</span>
+      <button class="icon-button" id="sound-button" aria-label="Turn sound on" title="Sound"><span data-icon="volume"></span></button>
+      <button class="icon-button" id="pause-button" aria-label="Pause game" title="Pause"><span data-icon="pause"></span></button>
+      <button class="help-button" id="help-button"><span data-icon="help"></span><span>How to play</span></button>
+    </nav>
+  </header>
+  <main>
+    <div class="page-heading">
+      <div><div class="eyebrow"><span class="little-line"></span> THE GOOD KIND OF NEEDLEWORK</div><h1>Big hay. <span>Bigger ideas.</span></h1><p>Find a needle. Build a clever little search operation.</p></div>
+      <div class="balance"><span class="coin-icon" data-icon="coin"></span><div><small>YOUR COINS</small><strong id="credits">35</strong></div><span class="balance-label">Every find pays.</span></div>
+    </div>
+    <div class="game-layout">
+      <section class="field-panel" aria-label="Search field">
+        <div class="field-heading"><div><div class="eyebrow" id="contract-number">EXPEDITION 01 / 24</div><h2 id="contract-name">Sunlit meadow</h2></div><div class="field-tag"><i></i><span id="field-tag">A fresh start</span></div></div>
+        <div class="objectives-bar" id="objectives-bar" aria-label="Field objectives"></div>
+        <div class="scene-wrap" id="scene-wrap">
+          <canvas id="field-canvas" tabindex="0" aria-label="Hay field. Hold and drag to sweep. Use arrow keys to move your cursor and Enter to sweep."></canvas>
+          <div class="scene-label"><span data-icon="sun"></span><span id="scene-description">A good day to find something.</span></div>
+          <div class="terrain-help" id="terrain-help">Sweep the loose straw. It tumbles and settles.</div>
+          <div class="camera-controls" aria-label="View and daylight controls">
+            <div class="camera-tools" role="group" aria-label="Camera controls">
+              <button id="orbit-button" class="camera-button view-mode" aria-label="Rotate view mode" aria-pressed="false" title="Rotate view. You can also right-drag or Alt-drag. On touchscreens, turn this on before dragging."><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 8a8 8 0 0 0-14-2L3 9m0-6v6h6M4 16a8 8 0 0 0 14 2l3-3m0 6v-6h-6"/></svg><span>Rotate</span></button>
+              <button id="camera-reset" class="camera-button" aria-label="Reset camera view" title="Return to the original view"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m3 11 9-8 9 8M5 10v10h14V10M9 20v-6h6v6"/></svg></button>
+              <button id="camera-zoom-out" class="camera-button" aria-label="Zoom out" title="Zoom out. You can also scroll over the field."><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14"/></svg></button>
+              <button id="camera-zoom-in" class="camera-button" aria-label="Zoom in" title="Zoom in. You can also scroll over the field."><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14M12 5v14"/></svg></button>
+            </div>
+            <div class="light-tools" role="group" aria-label="Time of day">
+              <span class="day-phase" id="day-phase">Daylight</span>
+              <button id="time-button" class="camera-button" aria-label="Change time of day" title="Skip to the next sunrise, daylight, sunset, or night"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8"/><path d="M12 7v5l3 2M19 3l2 2"/></svg></button>
+            </div>
+          </div>
+          <div id="scenery-tooltip" class="scenery-tooltip" hidden></div>
+          <div class="first-hint" id="first-hint"><span data-icon="cursor"></span><strong>Hold & sweep the hay</strong><span>Finds sell themselves. Follow the glimmer.</span></div>
+          <div class="signal-card"><span class="signal-icon" data-icon="radar"></span><div><small>NEEDLE SIGNAL</small><strong id="signal-text">Start exploring</strong><p id="signal-description">Clear hay or use a scanner to narrow the search.</p></div><span class="signal-status" id="signal-status">···</span></div>
+          <button id="needle-marker" class="needle-marker" aria-label="Collect the exposed needle" hidden>✦ Collect needle</button>
+          <div class="combo-badge" id="combo-badge" hidden>Good sweep! <b>×1.2</b></div>
+          <div class="found-overlay" id="found-overlay" hidden><div class="found-card"><span class="found-spark">✦</span><div class="eyebrow">A SMALL, SHINY VICTORY</div><h2 id="found-title">There it is.</h2><p id="found-description">A needle found. An idea proven.</p><div class="completion-reward" id="completion-reward"></div><button class="primary-button" id="next-button">On to the next field <span data-icon="arrow"></span></button></div></div>
+          <div class="pause-overlay" id="pause-overlay" hidden><div><span data-icon="pause"></span><h2>Take a breather.</h2><p>Your little farm can wait.</p><button class="primary-button" id="resume-button">Back to the hunt</button></div></div>
+          <div class="tool-dock" id="tool-dock" aria-label="Search tools"></div>
+        </div>
+        <div class="field-footer"><div class="progress-info"><span id="clear-percent">0%</span><span>of the hay cleared</span><span class="progress-track"><i id="clear-progress"></i></span></div><div class="control-hint"><kbd>1</kbd><kbd>2</kbd><kbd>3</kbd><kbd>4</kbd> tools <span>·</span> <kbd>Space</kbd> scan</div></div>
+      </section>
+      <aside class="workshop-panel" aria-label="Workshop">
+        <div class="workshop-title"><span class="workshop-symbol" data-icon="workshop"></span><div><div class="eyebrow">WORK SMARTER</div><h2>Your workshop</h2></div><span class="tiny-label" id="upgrade-count">0 / 21</span></div>
+        <div class="panel-tabs" role="tablist" aria-label="Workshop sections"><button id="tab-workshop" role="tab" data-tab="workshop" aria-selected="true" aria-controls="panel-content">Gear</button><button id="tab-research" role="tab" data-tab="research" aria-selected="false" aria-controls="panel-content">Tech tree</button><button id="tab-collection" role="tab" data-tab="collection" aria-selected="false" aria-controls="panel-content">Finds <span id="finds-count">0</span></button></div>
+        <div id="panel-content" class="panel-content" role="tabpanel" aria-labelledby="tab-workshop"></div>
+        <div class="workshop-bottom"><span data-icon="leaf"></span><span>A little progress, every sweep.</span></div>
+      </aside>
+    </div>
+    <footer class="page-footer"><span><span class="footer-star">✳</span> Made for the joy of the find.</span><div><button id="motion-button">Reduce motion</button><span>·</span><button id="restart-button">New expedition</button></div><span id="needle-count">0 / 24 needles found</span></footer>
+  </main>
+  <div class="toast-stack" id="toast-stack" role="status" aria-live="polite"></div>
+  <dialog id="help-dialog"><button class="dialog-close icon-button" data-close="help-dialog" aria-label="Close instructions"><span data-icon="close"></span></button><div class="eyebrow">A FIELD GUIDE TO THE GOOD STUFF</div><h2>A little hunt.<br>A lot less hassle.</h2><p>Twenty-four fields across three chapters. A growing workshop. Remix contracts after the finale.</p><div class="guide-steps"><div><span>01</span><div><strong>Sweep, don't click forever.</strong><p>Hold and move across the hay. Valuables sell automatically, and supplies go into your pockets.</p></div></div><div><span>02</span><div><strong>Put your coins to work.</strong><p>The tech tree has three paths: better tools, sharper signals, and helpful little drones. Yellow hay suits the vacuum, green tangles need a cutter, and charged gray hay suits the magnet.</p></div></div><div><span>03</span><div><strong>Follow the signal.</strong><p>Clear half the field for a clue, or use a scanner charge. The needle glows once exposed. Sweep over it to collect it. Salvage, material, and specialist goals complete the field.</p></div></div><div><span>04</span><div><strong>Take a look around.</strong><p>Click the farm objects to explore them. Right-drag or Alt-drag rotates the view, and scrolling zooms. On a touchscreen, turn on Rotate before dragging. Use the clock button to jump between sunrise, daylight, sunset, and night.</p></div></div></div><div class="keyboard-guide"><strong>Keyboard explorers</strong><p>Arrow keys move your cursor. Hold Enter to sweep. 1, 2, 3, 4 switch tools. Space scans. P pauses. Escape closes a window. Tab reaches the view controls.</p></div><button class="primary-button" data-close="help-dialog">Let's find something <span data-icon="arrow"></span></button></dialog>
+  <dialog id="restart-dialog"><div class="eyebrow">A FRESH PATCH OF HAY</div><h2>Start a new expedition?</h2><p>This replaces your current progress and collection. Your sound and motion settings stay with you.</p><div class="dialog-actions"><button class="secondary-button" data-close="restart-dialog">Keep exploring</button><button class="primary-button" id="confirm-restart">Start fresh</button></div></dialog>
+  <script type="module" src="./app.js"></script>
+</body>
+</html>
