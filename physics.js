@@ -3,6 +3,9 @@ import * as CANNON from './vendor/cannon-es.js';
 export const MAX_HAY_BODIES = 160;
 const GROUND_Y = 0.35;
 const FIXED_STEP = 1 / 60;
+const MAX_SUBSTEPS = 24;
+const MAX_SCENERY_SPEED = 12;
+const MAX_SCENERY_ANGULAR_SPEED = 24;
 const HALF_STRAW = new CANNON.Vec3(0.022, 0.022, 0.16);
 const MASS = 0.035;
 const clamp = (value, low, high) => Math.max(low, Math.min(high, value));
@@ -16,6 +19,10 @@ export function createHayPhysics() {
   world.solver.tolerance = 0.001;
   const strawMaterial = new CANNON.Material('loose hay');
   const terrainMaterial = new CANNON.Material('farm floor');
+  const sceneryMaterial = new CANNON.Material('farm objects');
+  world.addContactMaterial(new CANNON.ContactMaterial(strawMaterial, sceneryMaterial, {
+    friction: 0.54, restitution: 0.025, contactEquationStiffness: 1e7, contactEquationRelaxation: 4,
+  }));
   world.addContactMaterial(new CANNON.ContactMaterial(strawMaterial, terrainMaterial, {
     friction: 0.58, restitution: 0.015, contactEquationStiffness: 1e7, contactEquationRelaxation: 4,
   }));
@@ -27,6 +34,7 @@ export function createHayPhysics() {
 
   const bodies = [];
   const terrain = [];
+  const scenery = new Map();
   let identity = null;
   let cols = 0;
   let rows = 0;
@@ -58,8 +66,8 @@ export function createHayPhysics() {
   staticBox(6.55, 1.35, 0, 0.12, 2, 10.2);
   staticBox(0, 1.35, -5.05, 13.2, 2, 0.12);
   staticBox(0, 1.35, 5.05, 13.2, 2, 0.12);
-  staticBox(3.9, 0.97, -3.35, 1.65, 1.38, 1.35);
-  staticBox(3.72, 0.66, 3.38, 0.65, 0.62, 0.62);
+  // Farm objects are registered from the rendered mesh transforms. Keeping them
+  // separate preserves open gaps, roof slopes, stacked crates and moving parts.
 
   function removeLoose(body) {
     body.removeEventListener('collide', body.hayCollisionListener);
@@ -71,6 +79,8 @@ export function createHayPhysics() {
     bodies.length = 0;
     for (const tile of terrain) if (tile?.body) world.removeBody(tile.body);
     terrain.length = 0;
+    for (const record of scenery.values()) world.removeBody(record.body);
+    scenery.clear();
     identity = null;
     cols = 0;
     rows = 0;
@@ -121,6 +131,235 @@ export function createHayPhysics() {
     }
     world.broadphase.dirty = true;
   }
+
+
+  function boundedVector(vector, limit) {
+    const speed = vector.length();
+    if (speed > limit) vector.scale(limit / speed, vector);
+  }
+
+  function cylinderShape(radiusTop, radiusBottom, height, segments) {
+    if (radiusTop > 0 && radiusBottom > 0) return new CANNON.Cylinder(radiusTop, radiusBottom, height, segments);
+    // Stock Cylinder duplicates the apex once per segment and consequently
+    // creates degenerate faces with zero normals. A cone needs one shared apex.
+    const inverted = radiusBottom === 0;
+    const radius = Math.max(radiusTop, radiusBottom);
+    const baseY = (inverted ? 1 : -1) * height / 2;
+    const vertices = Array.from({ length: segments }, (_, index) => {
+      const angle = index * Math.PI * 2 / segments;
+      return new CANNON.Vec3(-Math.sin(angle) * radius, baseY, Math.cos(angle) * radius);
+    });
+    vertices.push(new CANNON.Vec3(0, -baseY, 0));
+    const faces = Array.from({ length: segments }, (_, index) => [index, segments, (index + 1) % segments]);
+    faces.push(Array.from({ length: segments }, (_, index) => index));
+    if (inverted) for (const face of faces) face.reverse();
+    const shape = new CANNON.ConvexPolyhedron({ vertices, faces });
+    Object.assign(shape, { radiusTop, radiusBottom, height, numSegments: segments });
+    return shape;
+  }
+
+  function describeShape(descriptor) {
+    if (!descriptor || typeof descriptor.id !== 'string' || !descriptor.id
+        || !Array.isArray(descriptor.position) || descriptor.position.length !== 3
+        || !descriptor.position.every(Number.isFinite)
+        || !Array.isArray(descriptor.quaternion) || descriptor.quaternion.length !== 4
+        || !descriptor.quaternion.every(Number.isFinite)) return null;
+    const positive = value => Number.isFinite(value) && value > 0 && value <= 40;
+    // World matrix decomposition can vary by a few floating-point ulps as a
+    // mesh rotates. Geometry remains cached until its dimensions really change.
+    const dimension = value => value === 0 ? 0 : Math.max(1e-7, Number(value.toFixed(7)));
+    let signature;
+    let make;
+    if (descriptor.type === 'box' && Array.isArray(descriptor.size)
+        && descriptor.size.length === 3 && descriptor.size.every(positive)) {
+      const size = descriptor.size.map(dimension);
+      signature = `box:${size.join(':')}`;
+      make = () => new CANNON.Box(new CANNON.Vec3(...size.map(value => value / 2)));
+    } else if (descriptor.type === 'cylinder' && positive(descriptor.height)
+        && Number.isFinite(descriptor.radiusTop) && descriptor.radiusTop >= 0
+        && Number.isFinite(descriptor.radiusBottom) && descriptor.radiusBottom >= 0
+        && positive(Math.max(descriptor.radiusTop, descriptor.radiusBottom))) {
+      const radiusTop = dimension(descriptor.radiusTop);
+      const radiusBottom = dimension(descriptor.radiusBottom);
+      const height = dimension(descriptor.height);
+      const segments = Math.floor(clamp(finite(descriptor.segments, 16), 4, 64));
+      signature = `cylinder:${radiusTop}:${radiusBottom}:${height}:${segments}`;
+      // Cannon and Three cylinders both use their local Y axis.
+      make = () => cylinderShape(radiusTop, radiusBottom, height, segments);
+    } else if (descriptor.type === 'sphere' && positive(descriptor.radius)) {
+      const radius = dimension(descriptor.radius);
+      signature = `sphere:${radius}`;
+      make = () => new CANNON.Sphere(radius);
+    } else return null;
+    const quaternion = new CANNON.Quaternion(...descriptor.quaternion);
+    if (Math.hypot(...descriptor.quaternion) < 0.00001) return null;
+    quaternion.normalize();
+    return { signature, make, quaternion, position: new CANNON.Vec3(...descriptor.position) };
+  }
+
+  /** A complete set of visible, separately oriented farm mesh colliders. */
+  function syncScenery(descriptors, dt = 0) {
+    if (disposed || !Array.isArray(descriptors)) return;
+    const seen = new Set();
+    const duration = clamp(finite(dt, 0), 0, 0.05);
+    for (const descriptor of descriptors) {
+      const shape = describeShape(descriptor);
+      if (!shape || seen.has(descriptor.id)) continue;
+      seen.add(descriptor.id);
+      let record = scenery.get(descriptor.id);
+      const moving = descriptor.moving === true;
+      if (!record) {
+        const body = new CANNON.Body({ mass: 0, type: moving ? CANNON.Body.KINEMATIC : CANNON.Body.STATIC,
+          material: sceneryMaterial, shape: shape.make(), allowSleep: false,
+          position: shape.position.clone(), quaternion: shape.quaternion.clone() });
+        body.haySceneryId = descriptor.id;
+        body.hayObjectId = descriptor.objectId ?? descriptor.id;
+        body.hayShapeType = descriptor.type;
+        record = { body, signature: shape.signature, moving,
+          fromPosition: shape.position.clone(), targetPosition: shape.position.clone(),
+          fromQuaternion: shape.quaternion.clone(), targetQuaternion: shape.quaternion.clone(), pending: false };
+        scenery.set(descriptor.id, record);
+        world.addBody(body);
+        wakeSceneryNeighbors(record);
+      } else {
+        const body = record.body;
+        const geometryChanged = record.signature !== shape.signature;
+        if (geometryChanged) {
+          wakeSceneryNeighbors(record);
+          body.removeShape(body.shapes[0]);
+          body.addShape(shape.make());
+          record.signature = shape.signature;
+          body.hayShapeType = descriptor.type;
+        }
+        body.hayObjectId = descriptor.objectId ?? descriptor.id;
+        body.type = moving ? CANNON.Body.KINEMATIC : CANNON.Body.STATIC;
+        record.moving = moving;
+        record.fromPosition.copy(record.targetPosition);
+        record.fromQuaternion.copy(record.targetQuaternion);
+        record.targetPosition.copy(shape.position);
+        record.targetQuaternion.copy(shape.quaternion);
+        body.velocity.setZero();
+        body.angularVelocity.setZero();
+        const translation = record.fromPosition.distanceTo(shape.position);
+        const delta = shape.quaternion.mult(record.fromQuaternion.conjugate());
+        // q and -q encode the same rotation. Choose the short, continuous arc.
+        if (delta.w < 0) delta.set(-delta.x, -delta.y, -delta.z, -delta.w);
+        const sinHalf = Math.hypot(delta.x, delta.y, delta.z);
+        const angle = 2 * Math.atan2(sinHalf, Math.max(0, delta.w));
+        record.pending = moving && duration > 0 && (translation > 1e-8 || angle > 1e-8)
+          && translation < 1 && angle < 1.2;
+        if (record.pending) {
+          shape.position.vsub(record.fromPosition, body.velocity);
+          body.velocity.scale(1 / duration, body.velocity);
+          boundedVector(body.velocity, MAX_SCENERY_SPEED);
+          if (sinHalf > 1e-9) body.angularVelocity.set(delta.x, delta.y, delta.z)
+            .scale(angle / (duration * sinHalf), body.angularVelocity);
+          boundedVector(body.angularVelocity, MAX_SCENERY_ANGULAR_SPEED);
+        } else {
+          record.fromPosition.copy(shape.position);
+          record.fromQuaternion.copy(shape.quaternion);
+        }
+        body.position.copy(shape.position);
+        body.quaternion.copy(shape.quaternion);
+        body.updateInertiaWorld();
+        body.aabbNeedsUpdate = true;
+        // Changed supports need to wake sleeping straw, including a removed roof.
+        if (geometryChanged || translation > 1e-8 || angle > 1e-8) wakeSceneryNeighbors(record);
+      }
+    }
+    for (const [id, record] of scenery) {
+      if (seen.has(id)) continue;
+      wakeSceneryNeighbors(record);
+      world.removeBody(record.body);
+      scenery.delete(id);
+    }
+    world.broadphase.dirty = true;
+  }
+
+  function wakeSceneryNeighbors(record) {
+    const reach = record.body.boundingRadius + 0.35;
+    for (const body of bodies) {
+      if (body.position.distanceTo(record.targetPosition) < reach
+          || body.position.distanceTo(record.fromPosition) < reach) {
+        body.wakeUp();
+        body.hayRestTime = 0;
+      }
+    }
+  }
+
+  // Catch a fast straw that crosses a thin box completely between two samples.
+  // The normal solver still handles resting contacts and ordinary impacts. The
+  // guard uses the straw's projected extent rather than a large enclosing ball,
+  // so it does not fill in the visible spaces between rails and crates.
+  function guardBoxSweep(body, before) {
+    if (body.position.distanceSquared(before) < 0.03 ** 2) return;
+    let nearest = null;
+    for (const record of scenery.values()) {
+      const shape = record.body.shapes[0];
+      if (!(shape instanceof CANNON.Box)) continue;
+      const center = record.body.position;
+      const radius = record.body.boundingRadius + HALF_STRAW.z + .02;
+      if (['x', 'y', 'z'].some(axis => Math.max(before[axis], body.position[axis]) < center[axis] - radius
+          || Math.min(before[axis], body.position[axis]) > center[axis] + radius)) continue;
+      const inverse = record.body.quaternion.conjugate();
+      const start = inverse.vmult(before.vsub(record.body.position));
+      const end = inverse.vmult(body.position.vsub(record.body.position));
+      const relativeRotation = inverse.mult(body.quaternion);
+      const axes = [relativeRotation.vmult(new CANNON.Vec3(1, 0, 0)),
+        relativeRotation.vmult(new CANNON.Vec3(0, 1, 0)),
+        relativeRotation.vmult(new CANNON.Vec3(0, 0, 1))];
+      const extent = axis => Math.abs(axes[0][axis]) * HALF_STRAW.x
+        + Math.abs(axes[1][axis]) * HALF_STRAW.y + Math.abs(axes[2][axis]) * HALF_STRAW.z;
+      const half = { x: shape.halfExtents.x + extent('x'),
+        y: shape.halfExtents.y + extent('y'), z: shape.halfExtents.z + extent('z') };
+      if (['x', 'y', 'z'].every(axis => Math.abs(start[axis]) <= half[axis] + 0.001)) continue;
+      let enter = 0;
+      let exit = 1;
+      let normalAxis = null;
+      let normalSign = 0;
+      for (const axis of ['x', 'y', 'z']) {
+        const travel = end[axis] - start[axis];
+        if (Math.abs(travel) < 1e-9) {
+          if (Math.abs(start[axis]) > half[axis]) { enter = 2; break; }
+        } else {
+          let near = (-half[axis] - start[axis]) / travel;
+          let far = (half[axis] - start[axis]) / travel;
+          if (near > far) [near, far] = [far, near];
+          if (near > enter) {
+            enter = near;
+            normalAxis = axis;
+            normalSign = travel > 0 ? -1 : 1;
+          }
+          exit = Math.min(exit, far);
+          if (enter > exit) break;
+        }
+      }
+      if (normalAxis && enter >= 0 && enter <= exit && exit < 1
+          && (!nearest || enter < nearest.time)) {
+        const localNormal = new CANNON.Vec3();
+        localNormal[normalAxis] = normalSign;
+        nearest = { time: enter, normal: record.body.quaternion.vmult(localNormal), record };
+      }
+    }
+    if (!nearest) return;
+    before.lerp(body.position, Math.max(0, nearest.time - 0.0001), body.position);
+    nearest.normal.scale(0.001, sweepNudge);
+    body.position.vadd(sweepNudge, body.position);
+    const surfaceVelocity = new CANNON.Vec3();
+    nearest.record.body.getVelocityAtWorldPoint(body.position, surfaceVelocity);
+    const relativeVelocity = body.velocity.vsub(surfaceVelocity);
+    const incoming = relativeVelocity.dot(nearest.normal);
+    if (incoming < 0) {
+      nearest.normal.scale(-incoming * 1.025, sweepNudge);
+      body.velocity.vadd(sweepNudge, body.velocity);
+      body.angularVelocity.scale(0.9, body.angularVelocity);
+    }
+    body.wakeUp();
+    body.hayRestTime = 0;
+    body.aabbNeedsUpdate = true;
+    collisions += 1;
+  }
+  const sweepNudge = new CANNON.Vec3();
 
   function pileTop(x, z) {
     if (!cols || !rows) return GROUND_Y;
@@ -235,11 +474,41 @@ export function createHayPhysics() {
     if (disposed || !Number.isFinite(dt) || dt <= 0) return;
     const frame = Math.min(dt, 0.05);
     elapsed += frame;
-    world.step(FIXED_STEP, frame, 3);
+    let fastest = 0;
+    for (const body of bodies) fastest = Math.max(fastest,
+      body.velocity.length() + body.angularVelocity.length() * HALF_STRAW.z);
+    for (const record of scenery.values()) if (record.pending) fastest = Math.max(fastest,
+      record.body.velocity.length() + record.body.angularVelocity.length() * record.body.boundingRadius);
+    const count = Math.min(MAX_SUBSTEPS, Math.max(1, Math.ceil(frame / FIXED_STEP),
+      Math.ceil(frame * fastest / 0.04)));
+    const substep = frame / count;
     const touching = new Set();
-    for (const contact of world.contacts) {
-      touching.add(contact.bi.id);
-      touching.add(contact.bj.id);
+    const before = bodies.map(body => body.position.clone());
+    for (let index = 0; index < count; index += 1) {
+      for (const record of scenery.values()) {
+        if (!record.moving) continue;
+        if (record.pending) {
+          record.fromPosition.lerp(record.targetPosition, index / count, record.body.position);
+          record.fromQuaternion.slerp(record.targetQuaternion, index / count, record.body.quaternion);
+          record.body.aabbNeedsUpdate = true;
+        } else {
+          record.body.velocity.setZero();
+          record.body.angularVelocity.setZero();
+        }
+      }
+      for (let bodyIndex = 0; bodyIndex < bodies.length; bodyIndex += 1) before[bodyIndex].copy(bodies[bodyIndex].position);
+      world.step(substep);
+      for (const contact of world.contacts) {
+        touching.add(contact.bi.id);
+        touching.add(contact.bj.id);
+      }
+      for (let bodyIndex = 0; bodyIndex < bodies.length; bodyIndex += 1) guardBoxSweep(bodies[bodyIndex], before[bodyIndex]);
+    }
+    for (const record of scenery.values()) if (record.pending) {
+      record.body.position.copy(record.targetPosition);
+      record.body.quaternion.copy(record.targetQuaternion);
+      record.body.aabbNeedsUpdate = true;
+      record.pending = false;
     }
     // Bounds are a final guard against numerical tunneling after a long or overloaded frame.
     for (const body of bodies) {
@@ -289,5 +558,16 @@ export function createHayPhysics() {
     disposed = true;
   }
 
-  return { syncField, emit, stir, step, getBodies: () => bodies.slice(), reset, getStats, dispose };
+  function getSceneryStats() {
+    return { count: scenery.size, moving: [...scenery.values()].filter(record => record.moving).length,
+      objects: [...new Set([...scenery.values()].map(record => record.body.hayObjectId))],
+      shapes: [...scenery.values()].map(({ body }) => ({ id: body.haySceneryId, objectId: body.hayObjectId,
+        type: body.hayShapeType, moving: body.type === CANNON.Body.KINEMATIC,
+        position: body.position.toArray(), quaternion: body.quaternion.toArray(),
+        velocity: body.velocity.toArray(), angularVelocity: body.angularVelocity.toArray() })) };
+  }
+
+  return { syncField, syncScenery, emit, stir, step, getBodies: () => bodies.slice(),
+    getSceneryBodies: () => [...scenery.values()].map(record => record.body),
+    getSceneryStats, reset, getStats, dispose };
 }

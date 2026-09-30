@@ -14,7 +14,7 @@ Later contracts add specialist surveys and directional zones. A survey needs dis
 
 - Twenty-four contracts across three chapters, with material, zone, and specialist objectives. Repeatable seeded remix contracts continue after the campaign while preserving your kit.
 - Loose, packed, tangled, and static straw have different tool efficiencies.
-- Real loose-hay rigid bodies tumble, collide with the piles and farm, slide, and settle. Repeated sweeps stir fallen straw; each tool applies different impulses.
+- Real loose-hay rigid bodies tumble, collide with the piles and individual farm parts, slide, and settle. Barn walls and sloping roofs, stacked crates, fence posts and rails, conveyor parts, and plants use their rendered sizes and orientations. Rotating windmill blades and the helper drone have moving colliders. Repeated sweeps stir fallen straw; each tool applies different impulses.
 - Rake, field vacuum, salvage magnet, and rotary cutter with different reach and behavior.
 - Twenty-one permanent research nodes unlock over the chapters, including passive clearing drones and an automated sorting belt. Previously purchased upgrades stay owned.
 - Scanner charges and twelve-second turbo boosts, with duplicate-use protection.
@@ -36,6 +36,8 @@ Sound starts muted. Pause, open dialogs, and hidden pages stop the simulation an
 The interface uses native browser modules. Three.js 0.186.1 and Cannon-es 0.20.0 are bundled locally with their MIT licenses in `vendor/`. The farm is original procedural geometry, including instanced hay, animated equipment, projected pointer picking, lighting, and shadows. A simplified Canvas 2D fallback is included for browsers that cannot initialize WebGL. No downloaded game assets are used.
 
 `engine.js` is a deterministic simulation separated from the renderer and interface. Prices, upgrade effects, payouts, and tool locks are defined centrally. Actual tile depth, materials, objectives, needle position, loot, and claimed farm deliveries are preserved across saves. Old six-field and twelve-field saves carry forward into the new sites. Loose-body transforms are transient visual simulation and reset on reload. Automation exposes the needle and leaves the final collection to the player.
+
+`scenery-colliders.js` derives each solid farm part from its actual geometry and world transform, including animation and feedback scale. Physics keeps gaps between objects open and uses bounded substeps plus a swept-box guard for fast straw crossing thin parts. Pointer picking and interpolated drags respect solid scenery in front of the field. The Canvas 2D fallback uses simplified boxes for its schematic farm objects.
 
 Run `npm test` for simulation tests. Browser validation checks actual pointer and touch input, spending, item use, pause, save reload/recovery, mobile overflow, and the complete expedition. See `VALIDATION.md` for the tested scope and results.
 

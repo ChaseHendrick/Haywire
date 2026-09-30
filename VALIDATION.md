@@ -1,10 +1,10 @@
 # Validation
 
-Recorded September 29, 2026. These checks support the tested behavior; they do not establish that every possible bug has been eliminated.
+Updated September 30, 2026 for per-object collisions. These checks support the tested behavior; they do not establish that every possible bug has been eliminated.
 
 ## Automated simulation checks
 
-`npm test`: **46 tests passed**, comprising 22 engine tests, 8 physics tests, 8 daylight tests, and 8 input tests.
+`npm test`: **61 tests passed**, comprising 22 engine tests, 18 physics tests, 8 daylight tests, 8 input tests, and 5 rendered-geometry registration tests.
 
 Engine checks include all 24 contracts with actual earned credits, research milestone locks, achievable material/zone/specialist objectives, six-field and twelve-field save migrations, deterministic fields, single payouts, consumables, automation, malformed saves, and persistent farm deliveries. Remix checks cover deterministic generation, keeping the workshop and economy, reloads, and single completion rewards.
 
@@ -12,7 +12,11 @@ Input checks bound all clearing to one elapsed-time allowance, including rapid c
 
 Three.js and Cannon-es are bundled locally. Up to **160 loose straw bodies** undergo actual rigid-body simulation; their positions and quaternions drive the visible instances. Bulk field hay uses instanced geometry and depth-dependent static collision surfaces. The whole haystack is not simulated as millions of individual rigid bodies.
 
+Per-object checks cover oriented walls, pitched roof contact heights, separate stacked crates and open gaps, narrow fence impacts at high speed, cylinders, spheres, single-apex cones with finite outward normals, matching polygon segments, and both translating and rotating moving parts. Registration checks use actual Three.js meshes to verify child offsets, roof angles, parent rotation and feedback scale, moving transforms, hidden ancestors, and solid ray targets. Removed supports wake hay; hidden and reset objects leave no stale colliders. Thin-box sweep protection supplements the narrowphase for complete fast crossings, with bounded adaptive substeps.
+
 ## Browser checks
+
+The September 30 collision update passed 54 focused checks in headless Chrome at 1440 × 1000 and an emulated 390 × 844 viewport. The visible farm registered 106 individual solid parts, with hidden drone parts absent until unlocked. Tests checked roof tilt, conveyor yaw, stacked crate heights, animated blade and drone transforms, pointer and real emulated touch sweeps, farm visits, pause and reduced-motion freezes, and exact hunt-state reloads. Rays through an obstructing roof cannot select the field behind it, and holding Enter at an obscured cell preserves the hay state. No unexpected exceptions or invalid-geometry warnings were recorded. A 45-frame active-straw sample averaged 16.67 ms with a 95th percentile at or below 16.8 ms; this short headless sample does not establish performance on mobile hardware.
 
 Desktop Chrome suites exercise actual mouse, keyboard, and emulated touch input. Earlier coverage includes 21 core checks across the previous 12-contract campaign and all 21 research nodes, 5 focused dense-field/fallback/collection checks, and 14 farm interaction, orbit, zoom, lighting, pause, responsive-control, and Canvas 2D fallback checks. These earlier suites do not establish a complete browser playthrough of the final 24-contract campaign.
 

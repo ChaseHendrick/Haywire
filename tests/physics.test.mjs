@@ -177,3 +177,243 @@ test('sweeping wakes settled hay and gives each tool a spatially limited real im
     physics.dispose();
   }
 });
+
+const identityQuaternion = [0, 0, 0, 1];
+function box(id, position, size, quaternion = identityQuaternion, moving = false) {
+  return { id, objectId: id.split(':')[0], type: 'box', position, size, quaternion, moving };
+}
+function rotation(axis, angle) {
+  const half = angle / 2;
+  return axis.map(component => component * Math.sin(half)).concat(Math.cos(half));
+}
+function placeStraw(physics, position, velocity = [0, 0, 0], quaternion = identityQuaternion) {
+  physics.emit(position[0], position[2], 'magnet', 1, position[1]);
+  const body = physics.getBodies().at(-1);
+  body.position.set(...position);
+  body.velocity.set(...velocity);
+  body.angularVelocity.setZero();
+  body.quaternion.set(...quaternion);
+  body.aabbNeedsUpdate = true;
+  body.wakeUp();
+  return body;
+}
+
+test('scenery registration preserves separate exact shapes and updates only changed geometry', () => {
+  const physics = createHayPhysics();
+  const yaw = rotation([0, 1, 0], 0.7);
+  const descriptors = [box('barn:roof', [2, 1.6, -2], [1.8, 0.1, 1], yaw),
+    { id: 'mill:tower', objectId: 'mill', type: 'cylinder', position: [-2, 1, -2],
+      quaternion: identityQuaternion, radiusTop: .3, radiusBottom: .5, height: 1.4, moving: false },
+    { id: 'plant:crown', objectId: 'plant', type: 'sphere', position: [3, .8, 2],
+      quaternion: identityQuaternion, radius: .2, moving: false }];
+  physics.syncScenery(descriptors);
+  const [roof, tower, crown] = physics.getSceneryBodies();
+  const shape = roof.shapes[0];
+  assert.equal(physics.getSceneryStats().count, 3);
+  assert.deepEqual(roof.position.toArray(), descriptors[0].position);
+  assert.deepEqual(roof.quaternion.toArray(), yaw);
+  assert.deepEqual(shape.halfExtents.toArray(), [.9, .05, .5]);
+  assert.equal(tower.shapes[0].height, 1.4);
+  assert.equal(tower.shapes[0].radiusTop, .3);
+  assert.equal(crown.shapes[0].radius, .2);
+  physics.syncScenery(structuredClone(descriptors), 1 / 60);
+  assert.strictEqual(physics.getSceneryBodies()[0], roof);
+  assert.strictEqual(roof.shapes[0], shape);
+  descriptors[0].size[0] += 1e-14;
+  physics.syncScenery(descriptors);
+  assert.strictEqual(roof.shapes[0], shape, 'World-transform roundoff preserves cached geometry');
+  descriptors[0].size[0] = 2;
+  physics.syncScenery(descriptors);
+  assert.strictEqual(physics.getSceneryBodies()[0], roof);
+  assert.notStrictEqual(roof.shapes[0], shape);
+  assert.equal(roof.shapes[0].halfExtents.x, 1);
+  const snapshot = physics.getSceneryStats();
+  snapshot.shapes[0].position[0] = 999;
+  assert.equal(roof.position.x, 2);
+  physics.dispose();
+});
+
+test('rotated walls stop hay in their local orientation rather than a world-aligned oversized box', () => {
+  const physics = createHayPhysics();
+  const yaw = rotation([0, 1, 0], .68);
+  physics.syncScenery([box('fence:rail', [0, 1.1, 0], [.08, 1.2, 2], yaw)]);
+  const wall = physics.getSceneryBodies()[0];
+  const start = wall.quaternion.vmult({ x: -1, y: 0, z: 0 });
+  start.y += 1.1;
+  const velocity = wall.quaternion.vmult({ x: 16, y: 0, z: 0 });
+  const body = placeStraw(physics, start.toArray(), velocity.toArray(), yaw);
+  advance(physics, .15);
+  const local = wall.quaternion.conjugate().vmult(body.position.vsub(wall.position));
+  assert.ok(local.x < -.05, `Wall-local X ${local.x}`);
+  assert.ok(physics.getStats().collisions > 0);
+  assertBodyFinite(body);
+  physics.dispose();
+});
+
+test('sloped roofs support hay at the actual different heights of the pitched surface', () => {
+  const physics = createHayPhysics();
+  physics.syncScenery([box('barn:roof', [0, 1.2, 0], [2, .12, 2], rotation([1, 0, 0], .6))]);
+  const roof = physics.getSceneryBodies()[0];
+  const higher = placeStraw(physics, [-.5, 2.2, -.35]);
+  const lower = placeStraw(physics, [.5, 2.2, .35]);
+  advance(physics, 1);
+  for (const body of [higher, lower]) {
+    const local = roof.quaternion.conjugate().vmult(body.position.vsub(roof.position));
+    assert.ok(local.y > .04 && local.y < .3, `Roof-local height ${local.y}`);
+    assertBodyFinite(body);
+  }
+  assert.ok(higher.position.y > lower.position.y + .3,
+    `Pitched contact heights ${higher.position.y}, ${lower.position.y}`);
+  assert.ok(physics.getStats().collisions > 0);
+  physics.dispose();
+});
+
+test('stacked crates support stable hay while the real gap between neighboring crates remains open', () => {
+  const physics = createHayPhysics();
+  physics.syncScenery([box('crate:left-low', [-.45, .6, 0], [.5, .5, .5]),
+    box('crate:left-high', [-.45, 1.1, 0], [.5, .5, .5]),
+    box('crate:right-low', [.45, .6, 0], [.5, .5, .5])]);
+  const onStack = placeStraw(physics, [-.45, 2.2, 0]);
+  const inGap = placeStraw(physics, [0, 2.2, 0], [0, 0, 0], rotation([1, 0, 0], Math.PI / 2));
+  advance(physics, 5);
+  assert.ok(onStack.position.y > 1.34 && onStack.position.y < 1.52, `Stack height ${onStack.position.y}`);
+  assert.ok(inGap.position.y < .54, `Open gap height ${inGap.position.y}`);
+  assert.ok(Math.abs(inGap.position.x) < .18);
+  assert.ok(onStack.velocity.length() < .12);
+  assert.equal(onStack.sleepState, 2, 'A supported straw settles instead of jittering indefinitely');
+  physics.dispose();
+});
+
+test('thin fence contacts survive high-speed throws and leave the space between rails open', () => {
+  const physics = createHayPhysics();
+  physics.syncScenery([box('fence:lower', [0, .75, 0], [.04, .08, 2]),
+    box('fence:upper', [0, 1.45, 0], [.04, .08, 2])]);
+  const hit = placeStraw(physics, [-.6, 1.45, -.4], [240, 0, 0]);
+  const throughGap = placeStraw(physics, [-.6, 1.05, .4], [20, 0, 0]);
+  physics.step(.05);
+  assert.ok(hit.position.x < -.035, `Thin fence crossing ${hit.position.x}`);
+  assert.ok(throughGap.position.x > .3, `Real rail gap crossing ${throughGap.position.x}`);
+  assert.ok(hit.velocity.x < 10, `Fence impact speed ${hit.velocity.x}`);
+  assertBodyFinite(hit);
+  assertBodyFinite(throughGap);
+  physics.dispose();
+});
+
+test('cylinders retain their round silhouette and orientation and spheres support contact', () => {
+  const physics = createHayPhysics();
+  physics.syncScenery([{ id: 'roller', objectId: 'conveyor', type: 'cylinder',
+    position: [0, 1, 0], quaternion: rotation([0, 0, 1], Math.PI / 2),
+    radiusTop: .3, radiusBottom: .3, height: 2, moving: false },
+    { id: 'crown', objectId: 'plant', type: 'sphere', position: [2, .8, 0],
+      quaternion: identityQuaternion, radius: .3, moving: false }]);
+  const roller = placeStraw(physics, [0, 2, 0]);
+  const roundGap = placeStraw(physics, [0, 2, .5]);
+  const crown = placeStraw(physics, [2, 1.8, 0]);
+  advance(physics, .6);
+  assert.ok(roller.position.y > 1.29, `Horizontal cylinder top ${roller.position.y}`);
+  assert.ok(roundGap.position.y < .7, `Open space outside cylinder ${roundGap.position.y}`);
+  assert.ok(crown.position.y > 1.03, `Sphere contact ${crown.position.y}`);
+  for (const body of [roller, roundGap, crown]) assertBodyFinite(body);
+  physics.dispose();
+});
+
+test('moving parts carry bounded contact velocities, match their render pose, and wake resting hay', () => {
+  const physics = createHayPhysics();
+  const paddle = box('mill:blade', [-.5, .62, 0], [.1, .5, 1], identityQuaternion, true);
+  physics.syncScenery([paddle]);
+  const body = placeStraw(physics, [0, .38, 0]);
+  advance(physics, 5);
+  assert.equal(body.sleepState, 2);
+  const initial = body.position.x;
+  for (let frame = 1; frame <= 36; frame += 1) {
+    paddle.position[0] = -.5 + frame * .02;
+    paddle.quaternion = rotation([0, 1, 0], frame * .012);
+    physics.syncScenery([paddle], 1 / 60);
+    physics.step(1 / 60);
+    const collider = physics.getSceneryBodies()[0];
+    assert.deepEqual(collider.position.toArray(), paddle.position);
+    for (let index = 0; index < 4; index += 1) assert.ok(Math.abs(collider.quaternion.toArray()[index] - paddle.quaternion[index]) < 1e-9);
+    assert.ok(collider.velocity.length() <= 12.000001);
+    assert.ok(collider.angularVelocity.length() <= 24.000001);
+  }
+  assert.ok(body.position.x > initial + .1, `Moving paddle displacement ${body.position.x - initial}`);
+  assert.notEqual(body.sleepState, 2);
+  assertBodyFinite(body);
+  physics.dispose();
+});
+
+test('removed, hidden, invalid, and reset scenery cannot leave invisible colliders or stale support', () => {
+  const physics = createHayPhysics();
+  physics.syncScenery([box('drone:body', [0, 1, 0], [1, .1, 1], identityQuaternion, true)]);
+  const body = placeStraw(physics, [0, 2, 0]);
+  advance(physics, 5);
+  assert.ok(body.position.y > 1.04);
+  physics.syncScenery([]);
+  assert.equal(physics.getSceneryStats().count, 0);
+  advance(physics, 3);
+  assert.ok(body.position.y < .52, `Removed support fall ${body.position.y}`);
+  physics.syncScenery([box('bad', [NaN, 1, 0], [1, 1, 1]),
+    box('valid', [2, 1, 0], [1, 1, 1])]);
+  assert.equal(physics.getSceneryStats().count, 1);
+  physics.reset();
+  assert.equal(physics.getSceneryStats().count, 0);
+  assert.equal(physics.getStats().activeBodies, 0);
+  physics.syncScenery([box('valid', [2, 1, 0], [1, 1, 1])]);
+  physics.dispose();
+  physics.syncScenery([box('valid', [2, 1, 0], [1, 1, 1])]);
+  assert.equal(physics.getSceneryStats().count, 0);
+});
+
+
+test('low-poly cone colliders use one apex and outward finite normals without degenerate cylinder faces', () => {
+  const physics = createHayPhysics();
+  physics.syncScenery([{ id: 'mill:cap', objectId: 'mill', type: 'cylinder',
+    position: [0, 1.1, 0], quaternion: identityQuaternion,
+    radiusTop: 0, radiusBottom: .7, height: .8, segments: 7, moving: false },
+    { id: 'inverted-cone', objectId: 'test', type: 'cylinder',
+      position: [3, 1, 0], quaternion: identityQuaternion,
+      radiusTop: .3, radiusBottom: 0, height: .5, segments: 5, moving: false }]);
+  const [cone, inverted] = physics.getSceneryBodies();
+  assert.equal(cone.shapes[0].vertices.length, 8);
+  assert.equal(inverted.shapes[0].vertices.length, 6);
+  for (const collider of [cone, inverted]) for (const normal of collider.shapes[0].faceNormals) {
+    assert.ok(Number.isFinite(normal.length()));
+    assert.ok(normal.length() > .999 && normal.length() < 1.001);
+  }
+  const body = placeStraw(physics, [0, 2, 0]);
+  advance(physics, .7);
+  assert.ok(body.position.y > 1.2, `Cone contact height ${body.position.y}`);
+  assert.ok(physics.getStats().collisions > 0);
+  assertBodyFinite(body);
+  physics.dispose();
+});
+
+test('a purely rotating blade pushes straw with angular contact velocity while paused poses stay still', () => {
+  const physics = createHayPhysics();
+  const blade = box('mill:rotating-blade', [0, .8, 0], [.08, 1, .3], identityQuaternion, true);
+  physics.syncScenery([blade]);
+  const body = placeStraw(physics, [.2, .38, 0]);
+  advance(physics, 5);
+  assert.equal(body.sleepState, 2);
+  const initialX = body.position.x;
+  for (let frame = 1; frame <= 45; frame += 1) {
+    blade.quaternion = rotation([0, 0, 1], frame * .015);
+    physics.syncScenery([blade], 1 / 60);
+    const collider = physics.getSceneryBodies()[0];
+    assert.ok(collider.velocity.length() < 1e-10);
+    assert.ok(Math.abs(collider.angularVelocity.z - .9) < 1e-8);
+    physics.step(1 / 60);
+  }
+  assert.ok(body.position.x > initialX + .08, `Rotating blade push ${body.position.x - initialX}`);
+  physics.syncScenery([blade], 0);
+  const collider = physics.getSceneryBodies()[0];
+  assert.equal(collider.angularVelocity.length(), 0);
+  assert.equal(collider.velocity.length(), 0);
+  const pausedPosition = collider.position.toArray();
+  const pausedRotation = collider.quaternion.toArray();
+  physics.step(1 / 60);
+  assert.deepEqual(collider.position.toArray(), pausedPosition);
+  assert.deepEqual(collider.quaternion.toArray(), pausedRotation);
+  assertBodyFinite(body);
+  physics.dispose();
+});

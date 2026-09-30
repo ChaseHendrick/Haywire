@@ -138,7 +138,7 @@ function processEvents(events){
   }
   if(redraw){renderDock();renderPanel();save();}renderHUD();
 }
-function manualSweep(col,row,dt){const view=derive(state),work=sweepBudget.take(performance.now(),dt);if(!state.settings.reducedMotion)scene.interact?.(col,row,state.selectedTool,view.radius,dt);processEvents(engine.sweep(state,col,row,Math.max(work,view.needleExposed && Math.hypot(col-state.field.needleCell%state.field.cols,row-Math.floor(state.field.needleCell/state.field.cols))<=.8 ? .001 : 0)));}
+function manualSweep(col,row,dt){if(scene.isCellUnobstructed&&!scene.isCellUnobstructed(col,row))return;const view=derive(state),work=sweepBudget.take(performance.now(),dt);if(!state.settings.reducedMotion)scene.interact?.(col,row,state.selectedTool,view.radius,dt);processEvents(engine.sweep(state,col,row,Math.max(work,view.needleExposed && Math.hypot(col-state.field.needleCell%state.field.cols,row-Math.floor(state.field.needleCell/state.field.cols))<=.8 ? .001 : 0)));}
 function dragStroke(point,now,allocatedWork){
   if(!point){strokeAnchor=null;lastStrokeTime=now;return[];}
   if(!strokeAnchor){strokeAnchor={...point};lastStrokeTime=now;return[];}
@@ -151,6 +151,7 @@ function dragStroke(point,now,allocatedWork){
   const physicalSpacing=Math.max(1,Math.ceil(samples/Math.max(1,strokeBurstBudget)));
   for(let i=1;i<=samples;i++){
     const col=start.col+dx*i/samples,row=start.row+dy*i/samples;
+    if(scene.isCellUnobstructed&&!scene.isCellUnobstructed(col,row))continue;
     const cell=state.field.cells[Math.round(row)*state.field.cols+Math.round(col)];
     const hadHay=cell?.depth>0;
     if(!state.settings.reducedMotion)scene.interact?.(col,row,state.selectedTool,view.radius,Math.max(.015,dt));
@@ -252,5 +253,5 @@ function frame(now){
   strokeBurstBudget=3;
   requestAnimationFrame(frame);
 }
-window.__haywire=Object.freeze({getState:()=>state,engine,projectCell:(col,row,height)=>scene.project(col,row,height),projectObject:id=>scene.projectScenery?.(id),pickCell:(x,y)=>scene.pick(x,y),getCameraState:()=>scene.getCameraState?.(),getDaylightState:()=>scene.getDaylightState?.(),getInputStats:()=>sweepBudget.getState(),getPhysicsStats:()=>scene.getPhysicsStats?.()||{},refresh:renderAll,save,storageKey:SAVE_KEY});
+window.__haywire=Object.freeze({getState:()=>state,engine,projectCell:(col,row,height)=>scene.project(col,row,height),projectObject:id=>scene.projectScenery?.(id),pickCell:(x,y)=>scene.pick(x,y),getCameraState:()=>scene.getCameraState?.(),getDaylightState:()=>scene.getDaylightState?.(),getInputStats:()=>sweepBudget.getState(),getPhysicsStats:()=>scene.getPhysicsStats?.()||{},getCollisionStats:()=>scene.getCollisionStats?.()||{},refresh:renderAll,save,storageKey:SAVE_KEY});
 renderAll();save();requestAnimationFrame(frame);
