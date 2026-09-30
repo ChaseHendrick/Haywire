@@ -29,8 +29,9 @@ export function createScene(canvas) {
   light.shadow.camera.top=12; light.shadow.camera.bottom=-12; light.shadow.normalBias=.035;
   const hemisphere=new THREE.HemisphereLight('#f8fff2','#87976e',2.4);scene.add(light,hemisphere);
   const mats={grass:mat('#9aaf76'),soil:mat('#d0b487'),edge:mat('#b7c692'),wood:mat('#c7a47b'),dark:mat('#69704f'),red:mat('#bf7055'),roof:mat('#596a57'),cream:mat('#f4e8ca'),metal:mat('#7c9290'),orange:mat('#e48445'),leaf:mat('#6d8a57')};
-  const ground=mesh(new THREE.CylinderGeometry(6.95,7.12,.42,80),mats.edge,0,-.05,0);ground.scale.z=.78;
-  const turf=mesh(new THREE.CylinderGeometry(6.91,6.91,.09,80),mats.grass,0,.21,0);turf.scale.z=.78;
+  // Leave a small land margin around the barn and its roof overhang.
+  const ground=mesh(new THREE.CylinderGeometry(7.45,7.62,.42,80),mats.edge,0,-.05,0);ground.scale.z=.78;
+  const turf=mesh(new THREE.CylinderGeometry(7.41,7.41,.09,80),mats.grass,0,.21,0);turf.scale.z=.78;
   const fieldMat=mat('#c4a774');
   mesh(new THREE.BoxGeometry(7.35,.06,6.12),fieldMat,0,.29,.15);
   for(let i=0;i<11;i++){
